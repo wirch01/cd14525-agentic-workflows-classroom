@@ -8,11 +8,21 @@ from workflow_agents.base_agents import (
     RoutingAgent,
 )
 
+import io
 import logging
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
+
+# Force UTF-8 output. When stdout/stderr are redirected on Windows (e.g.
+# `python agentic_workflow.py > output.txt`), Python defaults to the legacy
+# 'charmap' codec, which cannot encode characters such as the check mark emoji
+# printed by the evaluation agents and crashes the evaluation loop.
+for _stream in (sys.stdout, sys.stderr):
+    if isinstance(_stream, io.TextIOWrapper):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 logging.basicConfig(
     level=logging.WARNING,
