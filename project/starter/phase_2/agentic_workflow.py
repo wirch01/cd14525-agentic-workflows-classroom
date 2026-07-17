@@ -28,6 +28,16 @@ if not openai_api_key:
         "OPENAI_API_KEY is not set. Add it to your environment or a local .env file."
     )
 
+# Steering flag for the final synthesis step (default: False).
+# When True, a final synthesis step merges all validated outputs into one
+# consistent project plan (final_project_plan); when False, the workflow ends
+# with the last completed step as output. Toggle it here or via the
+# SYNTHESIS_STEP_NEEDED environment variable ("true"/"false") to compare the
+# workflow output with and without synthesis.
+synthesis_step_needed = os.getenv("SYNTHESIS_STEP_NEEDED", "true").strip().lower() in (
+    "1", "true", "yes",
+)
+
 # load the product spec
 # TODO: 3 - Load the product spec document Product-Spec-Email-Router.txt into a variable called product_spec
 product_spec_path = os.path.join(
@@ -52,7 +62,18 @@ knowledge_action_planning = (
     "Features are defined by grouping related user stories. \n"
     "Tasks are defined for each story and represent the engineering "
     "work required to develop the product. \n"
-    "A development Plan for a product contains all these components"
+    "A development Plan for a product contains all these components. \n"
+    "Creating a development plan always consists of exactly these three "
+    "high-level workflow steps, in this order:\n"
+    "1. Product Manager: identify the user personas and define the user stories "
+    "for the product based on the product spec.\n"
+    "2. Program Manager: group the user stories into product features.\n"
+    "3. Development Engineer: define the engineering tasks required to "
+    "implement the user stories.\n"
+    "Return only these workflow steps as short instructions to be executed by "
+    "other agents, keeping the responsible role name at the start of each step. "
+    "Never write the actual user stories, features, or tasks yourself, and "
+    "never return more than these three steps."
 )
 # TODO: 4 - Instantiate an action_planning_agent using the 'knowledge_action_planning'
 action_planning_agent = ActionPlanningAgent(
@@ -122,7 +143,10 @@ knowledge_program_manager = (
     "cohesive groups. Each feature has a name, a description of what it does and "
     "its purpose, its key functionality, and the user benefit it delivers. "
     "Features describe grouped capabilities, not individual user stories and not "
-    "engineering implementation tasks."
+    "engineering implementation tasks. "
+    "Group the user stories provided in the prompt's shared workflow context; "
+    "stay consistent with the product spec below. "
+    "\n\nProduct Spec:\n" + product_spec
 )
 # Instantiate a program_manager_knowledge_agent using 'persona_program_manager' and 'knowledge_program_manager'
 # (This is a necessary step before TODO 8. Students should add the instantiation code here.)
@@ -175,7 +199,10 @@ knowledge_dev_engineer = (
     "needed to implement each user story. Each task describes what needs to be "
     "built, including the technical work required, acceptance criteria, an effort "
     "estimate, and dependencies. Tasks are implementation-level work items, not "
-    "user stories and not feature groupings."
+    "user stories and not feature groupings. "
+    "Define tasks for the user stories provided in the prompt's shared workflow "
+    "context, referencing those stories; stay consistent with the product spec below. "
+    "\n\nProduct Spec:\n" + product_spec
 )
 # Instantiate a development_engineer_knowledge_agent using 'persona_dev_engineer' and 'knowledge_dev_engineer'
 # (This is a necessary step before TODO 9. Students should add the instantiation code here.)
@@ -219,6 +246,63 @@ development_engineer_evaluation_agent = EvaluationAgent(
     max_interactions=10,
 )
 
+# Project Plan Synthesis - Knowledge Augmented Prompt Agent
+# Runs as a fixed final step (not routed by embedding similarity) and merges all
+# validated outputs from the shared workflow state into one coherent project plan.
+persona_synthesis = (
+    "You are a Project Plan Synthesizer. You are solely responsible for merging "
+    "already validated user stories, product features, and engineering tasks into "
+    "one coherent, internally consistent project plan document. You do NOT invent "
+    "new user stories, features, or tasks; you consolidate, deduplicate, and "
+    "cross-reference the material you are given."
+)
+knowledge_synthesis = (
+    "A complete project plan document for a product contains three consistent, "
+    "cross-referenced sections:\n"
+    "1. User Stories: numbered stories (US-1, US-2, ...) in the form 'As a [type "
+    "of user], I want [an action or feature] so that [benefit/value].'\n"
+    "2. Product Features: each with Feature Name, Description, Key Functionality, "
+    "User Benefit, and Related User Stories (the story IDs from section 1 that "
+    "the feature groups).\n"
+    "3. Engineering Tasks: each with Task ID, Task Title, Related User Story (a "
+    "real story ID from section 1), Description, Acceptance Criteria, Estimated "
+    "Effort, and Dependencies.\n"
+    "The plan must be internally consistent: every feature and every task "
+    "references only story IDs that exist in section 1, and all content stays "
+    "faithful to the product spec below. "
+    "\n\nProduct Spec:\n" + product_spec
+)
+synthesis_knowledge_agent = KnowledgeAugmentedPromptAgent(
+    openai_api_key=openai_api_key,
+    persona=persona_synthesis,
+    knowledge=knowledge_synthesis,
+)
+
+# Project Plan Synthesis - Evaluation Agent
+persona_synthesis_eval = (
+    "You are an evaluation agent that checks whether a synthesized project plan "
+    "is complete and internally consistent. You only judge the merged plan "
+    "document as a whole."
+)
+evaluation_criteria_synthesis = (
+    "The answer should be a single project plan document with three sections: "
+    "(1) numbered user stories (US-1, US-2, ...) in the form 'As a [type of "
+    "user], I want [an action or feature] so that [benefit/value].'; "
+    "(2) product features, each with Feature Name, Description, Key "
+    "Functionality, User Benefit, and Related User Stories listing story IDs "
+    "from section 1; "
+    "(3) engineering tasks, each with Task ID, Task Title, Related User Story, "
+    "Description, Acceptance Criteria, Estimated Effort, and Dependencies, where "
+    "every referenced user story ID exists in section 1."
+)
+synthesis_evaluation_agent = EvaluationAgent(
+    openai_api_key=openai_api_key,
+    persona=persona_synthesis_eval,
+    evaluation_criteria=evaluation_criteria_synthesis,
+    worker_agent=synthesis_knowledge_agent,
+    max_interactions=10,
+)
+
 
 # Error handling helpers
 def call_with_retries(description, func, *args, max_attempts=3, delay_seconds=5):
@@ -240,21 +324,82 @@ def call_with_retries(description, func, *args, max_attempts=3, delay_seconds=5)
 
 
 def run_worker_with_evaluation(role_name, knowledge_agent, evaluation_agent, query):
-    """Get a response from a knowledge agent and validate it with its evaluation agent.
+    """Run the worker/evaluator loop for a query and return the validated response.
 
-    Retries transient failures; if evaluation fails but the worker responded,
-    falls back to the unevaluated response instead of crashing the workflow.
+    The evaluation agent drives the worker internally (it prompts the worker with
+    the query, judges the response, and iterates with corrections). Retries
+    transient failures; if the evaluation loop fails entirely, falls back to a
+    single unevaluated worker response instead of crashing the workflow.
     """
-    response = call_with_retries(f"{role_name} knowledge agent", knowledge_agent.respond, query)
     try:
-        evaluation = call_with_retries(f"{role_name} evaluation agent", evaluation_agent.evaluate, response)
+        evaluation = call_with_retries(f"{role_name} evaluation loop", evaluation_agent.evaluate, query)
         return evaluation["final_response"]
     except Exception as error:
         logger.error(
-            "%s evaluation failed (%s); returning the unevaluated response as a fallback.",
+            "%s evaluation loop failed (%s); falling back to an unevaluated worker response.",
             role_name, error,
         )
-        return response
+        return call_with_retries(f"{role_name} knowledge agent (fallback)", knowledge_agent.respond, query)
+
+
+# Shared workflow state
+# Every validated step result is recorded here so that later steps (and the
+# final synthesis) build on the outputs of earlier steps instead of answering
+# in isolation. This keeps all personas working on the same Email Router
+# artifacts: the Program Manager groups the actual user stories the Product
+# Manager wrote, and the Development Engineer references those same stories.
+PRODUCT_NAME = "Email Router"
+workflow_state = []  # list of {"role": ..., "step": ..., "result": ...}
+
+# Upper bound for the shared context injected into each step, so the prompt
+# (persona + knowledge incl. product spec + context + step) stays safely
+# within the model's context window even if the plan has many steps.
+MAX_SHARED_CONTEXT_CHARS = 20000
+
+
+def format_shared_context():
+    """Render the accumulated workflow state as context for the next step.
+
+    If the accumulated results exceed MAX_SHARED_CONTEXT_CHARS, only the most
+    recent entries that fit are included (oldest entries are dropped first).
+    """
+    if not workflow_state:
+        return ""
+    sections = [
+        f"[{entry['role']}] Step: {entry['step']}\nValidated result:\n{entry['result']}"
+        for entry in workflow_state
+    ]
+    kept = []
+    total_chars = 0
+    for section in reversed(sections):
+        if kept and total_chars + len(section) > MAX_SHARED_CONTEXT_CHARS:
+            logger.warning(
+                "Shared context exceeds %d characters; dropping the %d oldest entries.",
+                MAX_SHARED_CONTEXT_CHARS, len(sections) - len(kept),
+            )
+            break
+        kept.insert(0, section)
+        total_chars += len(section)
+    return (
+        f"Shared workflow context for the {PRODUCT_NAME} product. The following "
+        "are the validated outputs of previously completed workflow steps. Stay "
+        "consistent with them and reference them where applicable:\n\n"
+        + "\n\n".join(kept)
+    )
+
+
+def build_step_query(step):
+    """Anchor a routed step to the Email Router product and prior validated outputs."""
+    query = f"Product: {PRODUCT_NAME}.\nCurrent step to complete: {step}"
+    context = format_shared_context()
+    if context:
+        query = f"{context}\n\n{query}"
+    return query
+
+
+def record_step(role_name, step, result):
+    """Store a validated step result in the shared workflow state."""
+    workflow_state.append({"role": role_name, "step": step, "result": result})
 
 
 # Job function persona support functions
@@ -266,32 +411,38 @@ def run_worker_with_evaluation(role_name, knowledge_agent, evaluation_agent, que
 #   4. Return the final validated response.
 def product_manager_support_function(query: str) -> str:
     """Route product-persona/user-story steps through the Product Manager agents."""
-    return run_worker_with_evaluation(
+    result = run_worker_with_evaluation(
         "Product Manager",
         product_manager_knowledge_agent,
         product_manager_evaluation_agent,
-        query,
+        build_step_query(query),
     )
+    record_step("Product Manager", query, result)
+    return result
 
 
 def program_manager_support_function(query: str) -> str:
     """Route product-feature steps through the Program Manager agents."""
-    return run_worker_with_evaluation(
+    result = run_worker_with_evaluation(
         "Program Manager",
         program_manager_knowledge_agent,
         program_manager_evaluation_agent,
-        query,
+        build_step_query(query),
     )
+    record_step("Program Manager", query, result)
+    return result
 
 
 def development_engineer_support_function(query: str) -> str:
     """Route engineering-task steps through the Development Engineer agents."""
-    return run_worker_with_evaluation(
+    result = run_worker_with_evaluation(
         "Development Engineer",
         development_engineer_knowledge_agent,
         development_engineer_evaluation_agent,
-        query,
+        build_step_query(query),
     )
+    record_step("Development Engineer", query, result)
+    return result
 
 
 # Routing Agent
@@ -340,6 +491,7 @@ routing_agent.agents = routes
 # Run the workflow
 
 print("\n*** Workflow execution started ***\n")
+print(f"synthesis_step_needed = {synthesis_step_needed}")
 # Workflow Prompt
 # ****
 workflow_prompt = (
@@ -394,6 +546,42 @@ for index, step in enumerate(workflow_steps, start=1):
     completed_steps.append(result)
     print(f"Result of step {index}:\n{result}")
 
+# Final synthesis step: merge all validated outputs from the shared workflow
+# state into one consistent project plan (user stories, features, tasks with
+# resolved cross-references). Invoked directly rather than via embedding
+# routing so the consolidation step can never be misrouted. Runs only when
+# synthesis_step_needed is True; otherwise the last completed step is the
+# final output, which allows comparing the workflow with and without synthesis.
+final_project_plan = None
+if not synthesis_step_needed:
+    print("\nSynthesis step skipped (synthesis_step_needed=False); "
+          "the final output is the last completed step.")
+elif workflow_state:
+    print(f"\n--- Executing final synthesis step ({len(workflow_state)} validated outputs) ---")
+    synthesis_query = (
+        f"Merge the validated outputs below into one complete, internally "
+        f"consistent project plan document for the {PRODUCT_NAME} product with "
+        "three sections: User Stories (numbered US-1, US-2, ...), Product "
+        "Features (each listing the story IDs it groups as Related User "
+        "Stories), and Engineering Tasks (each referencing a real story ID). "
+        "Do not invent new content; consolidate, deduplicate, and resolve all "
+        "cross-references.\n\n"
+        + format_shared_context()
+    )
+    try:
+        final_project_plan = run_worker_with_evaluation(
+            "Project Plan Synthesis",
+            synthesis_knowledge_agent,
+            synthesis_evaluation_agent,
+            synthesis_query,
+        )
+        completed_steps.append(final_project_plan)
+    except Exception as error:
+        logger.error(
+            "Final synthesis step failed (%s); falling back to the last completed step as output.",
+            error,
+        )
+
 print("\n*** Workflow execution completed ***\n")
 if failed_steps:
     logger.warning(
@@ -401,8 +589,31 @@ if failed_steps:
         len(failed_steps), len(workflow_steps),
         ", ".join(f"step {index} ('{step}')" for index, step in failed_steps),
     )
-if completed_steps:
-    print("Final output of the workflow:")
-    print(completed_steps[-1])
+
+output_file_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "agentic-workflow-output.txt"
+)
+if final_project_plan:
+    final_output_label = "Final output of the workflow (synthesized project plan):"
+    final_output = final_project_plan
+elif completed_steps:
+    if synthesis_step_needed:
+        final_output_label = "Final output of the workflow (synthesis unavailable, last completed step):"
+    else:
+        final_output_label = "Final output of the workflow (synthesis disabled, last completed step):"
+    final_output = completed_steps[-1]
+else:
+    final_output_label = None
+    final_output = None
+
+if final_output:
+    print(final_output_label)
+    print(final_output)
+    try:
+        with open(output_file_path, "w", encoding="utf-8") as output_file:
+            output_file.write(f"{final_output_label}\n\n{final_output}\n")
+        print(f"\nFinal output written to {output_file_path}")
+    except OSError as error:
+        logger.error("Could not write the final output to %s: %s", output_file_path, error)
 else:
     logger.error("All workflow steps failed; no final output is available.")

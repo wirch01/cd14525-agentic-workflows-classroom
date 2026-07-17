@@ -11,6 +11,19 @@ via semantic similarity, and each persona pairs a Knowledge Augmented Prompt
 Agent (worker) with an Evaluation Agent (validator) that checks the output
 against a required structure and requests corrections until it passes.
 
+Two orchestration mechanisms tie the personas together. First, a **shared
+workflow state** records every validated step result, and each routed step is
+augmented with the product name and all prior validated outputs before it
+reaches a worker agent — so the Program Manager groups the actual user stories
+the Product Manager wrote, and the Development Engineer defines tasks against
+those same stories. All three personas additionally carry the Email Router
+product spec in their knowledge, keeping every agent anchored to the same
+subject. Second, a **final synthesis step** (invoked directly after the loop,
+not via embedding routing, so it can never be misrouted) uses a dedicated
+Project Plan Synthesis agent with its own Evaluation Agent to merge all
+validated user stories, features, and engineering tasks into one consistent
+document with resolved cross-references.
+
 The full control flow, including the error-handling paths, is captured in the
 flowchart below (also maintained in [workflow_flowchart.md](workflow_flowchart.md)):
 
@@ -32,38 +45,44 @@ flowchart TD
     Router -->|Feature grouping step| PGM_SF[program_manager_support_function]
     Router -->|Engineering task step| DE_SF[development_engineer_support_function]
 
+    State[(Shared workflow state<br/>validated results of all<br/>previously completed steps)]
+    State -.->|build_step_query:<br/>prepend prior validated<br/>outputs + product context| PM_SF
+    State -.->|build_step_query| PGM_SF
+    State -.->|build_step_query| DE_SF
+
     subgraph PM [Product Manager]
-        PM_SF --> PM_K[Knowledge Augmented<br/>Prompt Agent - respond<br/>with retries]
-        PM_K --> PM_E[Evaluation Agent<br/>validate user stories]
-        PM_E -->|not valid, retry<br/>up to max_interactions| PM_K
+        PM_SF --> PM_E[Evaluation Agent drives<br/>Knowledge Augmented Prompt Agent:<br/>respond, judge user stories,<br/>iterate up to max_interactions]
         PM_E -->|valid| PM_Out[/Validated response/]
-        PM_E -.->|evaluation fails:<br/>fall back to<br/>unevaluated response| PM_Out
+        PM_E -.->|evaluation loop fails:<br/>fall back to single<br/>unevaluated response| PM_Out
     end
 
     subgraph PGM [Program Manager]
-        PGM_SF --> PGM_K[Knowledge Augmented<br/>Prompt Agent - respond<br/>with retries]
-        PGM_K --> PGM_E[Evaluation Agent<br/>validate features]
-        PGM_E -->|not valid, retry<br/>up to max_interactions| PGM_K
+        PGM_SF --> PGM_E[Evaluation Agent drives<br/>Knowledge Augmented Prompt Agent:<br/>respond, judge features,<br/>iterate up to max_interactions]
         PGM_E -->|valid| PGM_Out[/Validated response/]
-        PGM_E -.->|evaluation fails:<br/>fall back to<br/>unevaluated response| PGM_Out
+        PGM_E -.->|evaluation loop fails:<br/>fall back to single<br/>unevaluated response| PGM_Out
     end
 
     subgraph DE [Development Engineer]
-        DE_SF --> DE_K[Knowledge Augmented<br/>Prompt Agent - respond<br/>with retries]
-        DE_K --> DE_E[Evaluation Agent<br/>validate tasks]
-        DE_E -->|not valid, retry<br/>up to max_interactions| DE_K
+        DE_SF --> DE_E[Evaluation Agent drives<br/>Knowledge Augmented Prompt Agent:<br/>respond, judge tasks,<br/>iterate up to max_interactions]
         DE_E -->|valid| DE_Out[/Validated response/]
-        DE_E -.->|evaluation fails:<br/>fall back to<br/>unevaluated response| DE_Out
+        DE_E -.->|evaluation loop fails:<br/>fall back to single<br/>unevaluated response| DE_Out
     end
 
-    PM_Out --> Collect[Append result to<br/>completed_steps]
+    PM_Out --> Collect[Record result in shared<br/>workflow state and<br/>completed_steps]
     PGM_Out --> Collect
     DE_Out --> Collect
+    Collect -.-> State
 
     Collect --> More{More steps?}
     More -->|Yes| Loop
     More -->|No| Summary[Log summary of<br/>any failed steps]
-    Summary --> Final[/Print final output:<br/>last completed step/]
+
+    Summary --> Flag{synthesis_step_needed?<br/>default: false}
+    Flag -->|false: skip synthesis| Final
+    Flag -->|true| Synth[Final synthesis step<br/>invoked directly, not routed:<br/>Project Plan Synthesis agent +<br/>Evaluation Agent merge all validated<br/>outputs into one project plan with<br/>resolved cross-references]
+    State -.->|all validated outputs| Synth
+    Synth -->|synthesis fails:<br/>fall back to last<br/>completed step| Final
+    Synth --> Final[/Print final output and write it to<br/>agentic-workflow-output.txt:<br/>synthesized project plan if enabled,<br/>otherwise last completed step/]
     Final --> End([End Workflow])
 ```
 
@@ -81,51 +100,75 @@ flowchart TD
   with correction instructions until the output passes or `max_interactions`
   is reached. Validation is therefore part of the workflow, not an
   afterthought.
+- **Shared context keeps the personas on one subject.** All worker agents
+  carry the same Email Router product spec in their knowledge, and every
+  routed step is prefixed with the validated outputs of all prior steps.
+  Features therefore group the stories that were actually written, and tasks
+  reference those same stories rather than inventing parallel artifacts.
+- **A synthesized, complete final artifact.** A dedicated Project Plan
+  Synthesis agent — validated by its own Evaluation Agent against
+  completeness and cross-reference criteria — merges all validated outputs
+  into one document (numbered user stories, features citing the story IDs
+  they group, tasks citing real story IDs), instead of the final output being
+  whatever the last step happened to produce.
 - **Dynamic decomposition and routing.** The Action Planning Agent derives the
   steps from the prompt at runtime rather than from a hard-coded pipeline, and
   the Routing Agent selects the persona per step via embedding similarity. The
   same orchestration would work for a different product spec or a differently
-  phrased prompt without code changes.
+  phrased prompt without code changes. The synthesis step, by contrast, is
+  deliberately invoked directly (not routed) so the consolidation can never be
+  misrouted.
 - **Robustness against transient failures.** Agent calls are wrapped in a
-  retry helper (3 attempts with delays), a failed evaluation falls back to the
-  unevaluated worker response instead of crashing, an individual failed step
-  is logged and skipped rather than aborting the run, and the workflow ends
-  with a summary of any failures.
+  retry helper (3 attempts with delays), a failed evaluation loop falls back
+  to a single unevaluated worker response instead of crashing, an individual
+  failed step is logged and skipped rather than aborting the run, a failed
+  synthesis falls back to the last completed step, and the workflow ends with
+  a summary of any failures.
 
 ## Limitations
 
-- **The final output is only the last completed step.** The plan's components
-  (stories, features, tasks) are produced across separate steps, but only
-  `completed_steps[-1]` is printed as "the" result. There is no synthesis
-  agent that merges all validated outputs into one coherent project plan, so
-  the comprehensiveness of the final artifact depends on what the last step
-  happens to contain.
-- **No shared state between steps.** Each routed step is answered
-  independently: the Program Manager does not automatically receive the user
-  stories the Product Manager just produced, and the Development Engineer
-  cannot reliably reference real story IDs. Consistency between stories,
-  features, and tasks is therefore not guaranteed.
 - **Routing is only as good as the route descriptions.** Embedding-based
   routing can misdirect ambiguous steps (e.g. "define the project plan"),
-  and there is no route for meta-steps such as consolidation, nor a
-  confidence threshold that would flag a poor match instead of forcing a
-  choice.
+  and there is no confidence threshold that would flag a poor match instead
+  of forcing a choice.
 - **Structural rather than semantic evaluation.** The Evaluation Agents check
   format compliance, not factual grounding in the product spec. A well-formed
   but inaccurate user story passes. The evaluation fallback added for
   robustness also means an unvalidated response can silently enter the final
   result (it is logged, but still used).
+- **Context grows with each step.** Because every step and the synthesis
+  receive all prior validated outputs plus the product spec, prompt size
+  grows over the run. For this spec and model context window that is
+  unproblematic, but a much larger spec or longer plan would need
+  summarization or selective context (e.g. only pass the artifacts a role
+  needs) instead of the full shared state.
+
+## Implemented Improvement
+
+**Shared workflow state plus a final synthesis step** (previously the main
+suggested improvement) is now implemented: every support function records its
+validated result in a shared `workflow_state`, `build_step_query` prepends the
+product context and all prior validated outputs to each routed step, and a
+fixed final synthesis step — a dedicated Project Plan Synthesis agent with its
+own evaluation criteria for a complete project plan — merges all validated
+user stories, features, and engineering tasks into one consistent document
+with resolved cross-references. This addressed the two biggest earlier
+limitations at once: the "last step only" output problem and the lack of
+consistency between the artifacts produced by the different personas.
+
+The synthesis step is gated by a steering flag, `synthesis_step_needed`
+(default `True`, overridable via the `SYNTHESIS_STEP_NEEDED` environment
+variable), so the workflow output can be compared with and without synthesis:
+when the flag is off, the final output is the last completed step; when it is
+on, the synthesized project plan is produced. In both cases the final output
+is printed and written to `agentic-workflow-output.txt`.
 
 ## Suggested Improvement
 
-**Add shared workflow state plus a final synthesis step.** Concretely: pass
-the accumulated `completed_steps` as context into each routed step (e.g.
-`routing_agent.route(step, context=completed_steps)` so the support functions
-can prepend prior validated outputs to the worker query), and append a fixed
-final step that a dedicated synthesis agent — a fourth route with its own
-evaluation criteria for a complete project plan — uses to merge all validated
-user stories, features, and engineering tasks into one consistent document
-with resolved cross-references (features cite the stories they group, tasks
-cite real story IDs). This single change addresses the two biggest
-limitations at once: the "last step only" output problem and the lack of
-consistency between the artifacts produced by the different personas.
+**Add semantic, spec-grounded evaluation with a routing confidence
+threshold.** Extend the Evaluation Agents to check not only structure but also
+grounding in the product spec (e.g. "does this story correspond to a
+capability actually described in the spec?"), and give the Routing Agent a
+minimum similarity threshold below which a step is flagged for review instead
+of being force-routed to the closest persona. Together these would close the
+remaining gap between format-valid output and factually correct output.
