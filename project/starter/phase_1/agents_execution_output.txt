@@ -1,0 +1,95 @@
+======================================================================
+Command: python direct_prompt_agent.py
+======================================================================
+The capital of France is Paris.
+
+Knowledge source: The DirectPromptAgent sends the prompt straight to the gpt-3.5-turbo model with no system prompt, persona, or added knowledge. The answer therefore comes solely from the LLM's own pre-trained general knowledge.
+
+======================================================================
+Command: python augmented_prompt_agent.py
+======================================================================
+Paris
+
+======================================================================
+Command: python knowledge_augmented_prompt_agent.py
+======================================================================
+Dear students, knowledge-based assistant. The capital of France is London, not Paris.
+
+The agent answered using ONLY the supplied knowledge ("The capital of France is London, not Paris") rather than its own inherent knowledge that the capital of France is Paris. This confirms the knowledge-augmented system prompt overrides the model's built-in knowledge.
+
+======================================================================
+Command: python rag_knowledge_prompt_agent.py
+======================================================================
+What is the podcast that Clara hosts about?
+Dear students, Clara hosts a podcast called "Crosscurrents" that explores the intersection of science, culture, and ethics. Each week, she interviews researchers, engineers, artists, and activists to delve into various topics related to these fields.
+
+======================================================================
+Command: python evaluation_agent.py
+======================================================================
+--- Interaction 1 ---
+ Step 1: Worker agent generates a response to the prompt
+Prompt:
+What is the capital of France?
+Worker Agent Response:
+Dear students, knowledge-based assistant. The capital of France is London, not Paris.
+ Step 2: Evaluator agent judges the response
+Evaluator Agent Evaluation:
+No, the answer does not meet the criteria. The answer provided is a sentence, not solely the name of a city.
+ Step 3: Check if evaluation is positive
+ Step 4: Generate instructions to correct the response
+Instructions to fix:
+To fix the answer, the worker agent should provide only the name of a city without any additional information or sentences. The answer should be concise and directly address the question without any unnecessary details.
+ Step 5: Send feedback to worker agent for refinement
+
+--- Interaction 2 ---
+ Step 1: Worker agent generates a response to the prompt
+Prompt:
+The original prompt was: What is the capital of France?
+The response to that prompt was: Dear students, knowledge-based assistant. The capital of France is London, not Paris.
+It has been evaluated as incorrect.
+Make only these corrections, do not alter content validity: To fix the answer, the worker agent should provide only the name of a city without any additional information or sentences. The answer should be concise and directly address the question without any unnecessary details.
+Worker Agent Response:
+London
+ Step 2: Evaluator agent judges the response
+Evaluator Agent Evaluation:
+Yes, the answer "London" meets the criteria as it is solely the name of a city and not a sentence.
+ Step 3: Check if evaluation is positive
+[OK] Final solution accepted.
+{'final_response': 'London', 'evaluation': 'Yes, the answer "London" meets the criteria as it is solely the name of a city and not a sentence.', 'iterations': 2}
+
+======================================================================
+Command: python routing_agent.py
+======================================================================
+0.38575450269853256
+0.1649701687495782
+0.002634527405910627
+[Router] Best agent: texas agent (score=0.386)
+Rome, Texas is a small unincorporated community located in Fannin County. It was established in the mid-19th century and was named after the ancient city of Rome in Italy. The community was originally settled by pioneers and farmers attracted to the fertile land in the area.
+
+Rome, Texas never experienced significant growth or development and remains a small rural community to this day. It is known for its peaceful countryside and historic charm. While it may not have the grandeur or historical significance of its namesake, Rome, Texas holds its own unique place in the history of the Lone Star State.
+0.1436350961275571
+0.28801085918735236
+0.032093566592413095
+[Router] Best agent: europe agent (score=0.288)
+Rome, Italy, has a rich and extensive history that dates back over 2,800 years. It was founded in the 8th century BC and grew to become the capital of the Roman Kingdom, Roman Republic, and Roman Empire. Rome was a major center of power, culture, and civilization in ancient times, known for its advancements in architecture, engineering, art, literature, and law.
+
+The Roman Republic was established in 509 BC, marking the beginning of Rome's republican era. During this time, Rome expanded its territory through conquest and colonization, eventually controlling most of the Mediterranean region. The republic faced internal conflicts, including the struggle between the patrician and plebeian classes, as well as external threats from neighboring powers.
+
+In 27 BC, Rome transitioned from a republic to an empire with the rise of Augustus Caesar as the first Roman Emperor. The Roman Empire reached its peak during the 2nd century AD, encompassing a vast territory from Britain to Egypt. Rome's influence extended far beyond its borders, shaping the culture, politics, and infrastructure of the regions it conquered.
+
+The decline of the Roman Empire began in the 3rd century AD, marked by political instability, economic challenges, and invasions by barbarian tribes. In 476 AD, the last Roman emperor in the West was deposed, traditionally considered the end of the Western Roman Empire.
+
+Despite the fall of the Western Roman Empire, the city of Rome remained a cultural and religious center. In the Middle Ages, Rome was ruled by various powers, including the Byzantine Empire, the Papal States, and various Italian city-states. The Renaissance period saw a revival of interest in classical Roman art and culture, with artists and scholars drawing inspiration from the city's ancient heritage.
+
+In 1871, Rome became the capital of the newly unified Kingdom of Italy. The city underwent significant urban development and restoration projects, preserving its ancient monuments and landmarks. Today, Rome is a vibrant modern city that continues to attract visitors from around the world to experience its rich history and cultural heritage.
+0.05930644167162193
+0.08284197755232077
+0.13007251677099022
+[Router] Best agent: math agent (score=0.130)
+It will take 40 days to complete all 20 stories.
+
+======================================================================
+Command: python action_planning_agent.py
+======================================================================
+['Crack eggs into a bowl', 'Beat eggs with a fork until mixed', 'Heat pan with butter or oil over medium heat', 'Pour egg mixture into pan', 'Stir gently as eggs cook', 'Remove from heat when eggs are just set but still moist', 'Season with salt and pepper', 'Serve immediately']
+
