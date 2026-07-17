@@ -8,8 +8,17 @@ from workflow_agents.base_agents import (
     RoutingAgent,
 )
 
+import logging
 import os
+import time
+
 from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("agentic_workflow")
 
 # TODO: 2 - Load the OpenAI key into a variable called openai_api_key
 load_dotenv()
@@ -52,11 +61,23 @@ action_planning_agent = ActionPlanningAgent(
 )
 
 # Product Manager - Knowledge Augmented Prompt Agent
-persona_product_manager = "You are a Product Manager, you are responsible for defining the user stories for a product."
+persona_product_manager = (
+    "You are a Product Manager. You are solely responsible for defining user "
+    "stories for a product. You identify the different user personas and, for "
+    "each persona, write user stories that capture the action they want to take "
+    "and the value they expect. You do NOT group user stories into features "
+    "(that is the Program Manager's responsibility) and you do NOT define "
+    "engineering or development tasks (that is the Development Engineer's "
+    "responsibility)."
+)
 knowledge_product_manager = (
-    "Stories are defined by writing sentences with a persona, an action, and a desired outcome. "
-    "The sentences always start with: As a "
-    "Write several stories for the product spec below, where the personas are the different users of the product. "
+    "A user story is a single sentence that combines a persona, an action, and a "
+    "desired outcome, and always starts with: As a "
+    "The exact structure is: 'As a [type of user], I want [an action or feature] "
+    "so that [benefit/value].' "
+    "Write several user stories for the product spec below, where the personas "
+    "are the different users of the product. "
+    "Do not group stories into features and do not define development tasks. "
     # TODO: 5 - Complete this knowledge string by appending the product_spec loaded in TODO 3
     "\n\nProduct Spec:\n" + product_spec
 )
@@ -71,7 +92,9 @@ product_manager_knowledge_agent = KnowledgeAugmentedPromptAgent(
 # TODO: 7 - Define the persona and evaluation criteria for a Product Manager evaluation agent and instantiate it as product_manager_evaluation_agent. This agent will evaluate the product_manager_knowledge_agent.
 # The evaluation_criteria should specify the expected structure for user stories (e.g., "As a [type of user], I want [an action or feature] so that [benefit/value].").
 persona_product_manager_eval = (
-    "You are an evaluation agent that checks the answers of other worker agents"
+    "You are an evaluation agent that checks whether the Product Manager's "
+    "answers are valid user stories. You only judge user-story quality and "
+    "structure; you do not evaluate features or development tasks."
 )
 evaluation_criteria_product_manager = (
     "The answer should be stories that follow the following structure: "
@@ -86,8 +109,21 @@ product_manager_evaluation_agent = EvaluationAgent(
 )
 
 # Program Manager - Knowledge Augmented Prompt Agent
-persona_program_manager = "You are a Program Manager, you are responsible for defining the features for a product."
-knowledge_program_manager = "Features of a product are defined by organizing similar user stories into cohesive groups."
+persona_program_manager = (
+    "You are a Program Manager. You are solely responsible for defining product "
+    "features. A feature is a cohesive group of related user stories. You take "
+    "existing user stories and organize the similar ones into named feature "
+    "groups. You do NOT write user stories (that is the Product Manager's "
+    "responsibility) and you do NOT define engineering or development tasks "
+    "(that is the Development Engineer's responsibility)."
+)
+knowledge_program_manager = (
+    "Features of a product are defined by organizing similar user stories into "
+    "cohesive groups. Each feature has a name, a description of what it does and "
+    "its purpose, its key functionality, and the user benefit it delivers. "
+    "Features describe grouped capabilities, not individual user stories and not "
+    "engineering implementation tasks."
+)
 # Instantiate a program_manager_knowledge_agent using 'persona_program_manager' and 'knowledge_program_manager'
 # (This is a necessary step before TODO 8. Students should add the instantiation code here.)
 program_manager_knowledge_agent = KnowledgeAugmentedPromptAgent(
@@ -97,7 +133,11 @@ program_manager_knowledge_agent = KnowledgeAugmentedPromptAgent(
 )
 
 # Program Manager - Evaluation Agent
-persona_program_manager_eval = "You are an evaluation agent that checks the answers of other worker agents."
+persona_program_manager_eval = (
+    "You are an evaluation agent that checks whether the Program Manager's "
+    "answers are valid product features. You only judge feature quality and "
+    "structure; you do not evaluate user stories or development tasks."
+)
 
 # TODO: 8 - Instantiate a program_manager_evaluation_agent using 'persona_program_manager_eval' and the evaluation criteria below.
 #                      "The answer should be product features that follow the following structure: " \
@@ -122,8 +162,21 @@ program_manager_evaluation_agent = EvaluationAgent(
 )
 
 # Development Engineer - Knowledge Augmented Prompt Agent
-persona_dev_engineer = "You are a Development Engineer, you are responsible for defining the development tasks for a product."
-knowledge_dev_engineer = "Development tasks are defined by identifying what needs to be built to implement each user story."
+persona_dev_engineer = (
+    "You are a Development Engineer. You are solely responsible for defining the "
+    "technical development tasks required to implement user stories. You describe "
+    "the concrete engineering work needed to build the product. You do NOT write "
+    "user stories (that is the Product Manager's responsibility) and you do NOT "
+    "group user stories into features (that is the Program Manager's "
+    "responsibility)."
+)
+knowledge_dev_engineer = (
+    "Development tasks are defined by identifying the concrete engineering work "
+    "needed to implement each user story. Each task describes what needs to be "
+    "built, including the technical work required, acceptance criteria, an effort "
+    "estimate, and dependencies. Tasks are implementation-level work items, not "
+    "user stories and not feature groupings."
+)
 # Instantiate a development_engineer_knowledge_agent using 'persona_dev_engineer' and 'knowledge_dev_engineer'
 # (This is a necessary step before TODO 9. Students should add the instantiation code here.)
 development_engineer_knowledge_agent = KnowledgeAugmentedPromptAgent(
@@ -133,7 +186,11 @@ development_engineer_knowledge_agent = KnowledgeAugmentedPromptAgent(
 )
 
 # Development Engineer - Evaluation Agent
-persona_dev_engineer_eval = "You are an evaluation agent that checks the answers of other worker agents."
+persona_dev_engineer_eval = (
+    "You are an evaluation agent that checks whether the Development Engineer's "
+    "answers are valid development tasks. You only judge development-task quality "
+    "and structure; you do not evaluate user stories or features."
+)
 # TODO: 9 - Instantiate a development_engineer_evaluation_agent using 'persona_dev_engineer_eval' and the evaluation criteria below.
 #                      "The answer should be tasks following this exact structure: " \
 #                      "Task ID: A unique identifier for tracking purposes\n" \
@@ -163,6 +220,43 @@ development_engineer_evaluation_agent = EvaluationAgent(
 )
 
 
+# Error handling helpers
+def call_with_retries(description, func, *args, max_attempts=3, delay_seconds=5):
+    """Call func(*args), retrying on failure (e.g. API timeouts or transient errors)."""
+    last_error: Exception = RuntimeError(f"{description} was never attempted")
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func(*args)
+        except Exception as error:
+            last_error = error
+            logger.warning(
+                "%s failed on attempt %d/%d: %s",
+                description, attempt, max_attempts, error,
+            )
+            if attempt < max_attempts:
+                time.sleep(delay_seconds)
+    logger.error("%s failed after %d attempts, giving up.", description, max_attempts)
+    raise last_error
+
+
+def run_worker_with_evaluation(role_name, knowledge_agent, evaluation_agent, query):
+    """Get a response from a knowledge agent and validate it with its evaluation agent.
+
+    Retries transient failures; if evaluation fails but the worker responded,
+    falls back to the unevaluated response instead of crashing the workflow.
+    """
+    response = call_with_retries(f"{role_name} knowledge agent", knowledge_agent.respond, query)
+    try:
+        evaluation = call_with_retries(f"{role_name} evaluation agent", evaluation_agent.evaluate, response)
+        return evaluation["final_response"]
+    except Exception as error:
+        logger.error(
+            "%s evaluation failed (%s); returning the unevaluated response as a fallback.",
+            role_name, error,
+        )
+        return response
+
+
 # Job function persona support functions
 # TODO: 11 - Define the support functions for the routes of the routing agent (e.g., product_manager_support_function, program_manager_support_function, development_engineer_support_function).
 # Each support function should:
@@ -172,23 +266,32 @@ development_engineer_evaluation_agent = EvaluationAgent(
 #   4. Return the final validated response.
 def product_manager_support_function(query: str) -> str:
     """Route product-persona/user-story steps through the Product Manager agents."""
-    response = product_manager_knowledge_agent.respond(query)
-    evaluation = product_manager_evaluation_agent.evaluate(response)
-    return evaluation["final_response"]
+    return run_worker_with_evaluation(
+        "Product Manager",
+        product_manager_knowledge_agent,
+        product_manager_evaluation_agent,
+        query,
+    )
 
 
 def program_manager_support_function(query: str) -> str:
     """Route product-feature steps through the Program Manager agents."""
-    response = program_manager_knowledge_agent.respond(query)
-    evaluation = program_manager_evaluation_agent.evaluate(response)
-    return evaluation["final_response"]
+    return run_worker_with_evaluation(
+        "Program Manager",
+        program_manager_knowledge_agent,
+        program_manager_evaluation_agent,
+        query,
+    )
 
 
 def development_engineer_support_function(query: str) -> str:
     """Route engineering-task steps through the Development Engineer agents."""
-    response = development_engineer_knowledge_agent.respond(query)
-    evaluation = development_engineer_evaluation_agent.evaluate(response)
-    return evaluation["final_response"]
+    return run_worker_with_evaluation(
+        "Development Engineer",
+        development_engineer_knowledge_agent,
+        development_engineer_evaluation_agent,
+        query,
+    )
 
 
 # Routing Agent
@@ -197,25 +300,36 @@ routes = [
     {
         "name": "Product Manager",
         "description": (
-            "Responsible for defining product personas and user stories only. "
-            "Does not define features or tasks. Does not group stories."
+            "Handles steps about defining user stories and user personas. "
+            "Use this route to identify the different types of users and write "
+            "user stories in the form 'As a [user], I want [action] so that "
+            "[benefit]'. Keywords: user story, user stories, persona, user needs, "
+            "who the users are, what users want. "
+            "Does NOT group stories into features and does NOT define "
+            "engineering or development tasks."
         ),
         "func": lambda x: product_manager_support_function(x),
     },
     {
         "name": "Program Manager",
         "description": (
-            "Responsible for defining product features by grouping related user "
-            "stories into cohesive feature-level plans. Does not define user "
-            "stories or engineering tasks."
+            "Handles steps about defining product features by grouping related "
+            "user stories into cohesive, named feature groups. "
+            "Keywords: feature, features, group user stories, feature grouping, "
+            "capabilities, product feature list. "
+            "Does NOT write individual user stories and does NOT define "
+            "engineering or development tasks."
         ),
         "func": lambda x: program_manager_support_function(x),
     },
     {
         "name": "Development Engineer",
         "description": (
-            "Responsible for defining the technical engineering tasks required to "
-            "implement user stories. Does not define user stories or features."
+            "Handles steps about defining the technical development or "
+            "engineering tasks required to implement user stories. "
+            "Keywords: development task, engineering task, implementation, build, "
+            "code, technical work, what needs to be built. "
+            "Does NOT write user stories and does NOT group stories into features."
         ),
         "func": lambda x: development_engineer_support_function(x),
     },
@@ -228,7 +342,16 @@ routing_agent.agents = routes
 print("\n*** Workflow execution started ***\n")
 # Workflow Prompt
 # ****
-workflow_prompt = "What would the development tasks for this product be?"
+workflow_prompt = (
+    "Generate a full and comprehensive project plan for the Email Router product: "
+    "1) detailed user stories in the form 'As a [type of user], I want [an action or feature] "
+    "so that [benefit/value].' from a product management perspective; "
+    "2) product features structured as 'Feature Name:', 'Description:', "
+    "'Key Functionality:', 'User Benefit:' from a program management perspective; "
+    "3) detailed engineering tasks structured as 'Task ID:', 'Task Title:', "
+    "'Related User Story:', 'Description:', 'Acceptance Criteria:', "
+    "'Estimated Effort:', 'Dependencies:' from a development perspective; "
+)
 # ****
 print(f"Task to complete in this workflow, workflow prompt = {workflow_prompt}")
 
@@ -241,19 +364,45 @@ print("\nDefining workflow steps from the workflow prompt")
 #      b. Append the result to 'completed_steps'.
 #      c. Print information about the step being executed and its result.
 #   4. After the loop, print the final output of the workflow (the last completed step).
-workflow_steps = action_planning_agent.extract_steps_from_prompt(workflow_prompt)
+try:
+    workflow_steps = call_with_retries(
+        "Action planning agent (step extraction)",
+        action_planning_agent.extract_steps_from_prompt,
+        workflow_prompt,
+    )
+except Exception as error:
+    logger.critical("Could not extract workflow steps, aborting the workflow: %s", error)
+    raise SystemExit(1) from error
+
+if not workflow_steps:
+    logger.critical("The action planning agent returned no steps, aborting the workflow.")
+    raise SystemExit(1)
+
+logger.info("Action planning agent produced %d workflow steps.", len(workflow_steps))
 
 completed_steps = []
+failed_steps = []
 for index, step in enumerate(workflow_steps, start=1):
     print(f"\n--- Executing step {index}/{len(workflow_steps)} ---")
     print(f"Step: {step}")
-    result = routing_agent.route(step)
+    try:
+        result = call_with_retries(f"Routing agent (step {index})", routing_agent.route, step)
+    except Exception as error:
+        logger.error("Step %d failed and will be skipped: %s", index, error)
+        failed_steps.append((index, step))
+        continue
     completed_steps.append(result)
     print(f"Result of step {index}:\n{result}")
 
 print("\n*** Workflow execution completed ***\n")
+if failed_steps:
+    logger.warning(
+        "%d of %d steps failed: %s",
+        len(failed_steps), len(workflow_steps),
+        ", ".join(f"step {index} ('{step}')" for index, step in failed_steps),
+    )
 if completed_steps:
     print("Final output of the workflow:")
     print(completed_steps[-1])
 else:
-    print("No steps were produced by the action planning agent.")
+    logger.error("All workflow steps failed; no final output is available.")
