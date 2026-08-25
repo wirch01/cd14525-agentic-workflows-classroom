@@ -122,11 +122,13 @@ product_manager_knowledge_agent = KnowledgeAugmentedPromptAgent(
 # Product Manager - Evaluation Agent
 # TODO: 7 - Define the persona and evaluation criteria for a Product Manager evaluation agent and instantiate it as product_manager_evaluation_agent. This agent will evaluate the product_manager_knowledge_agent.
 # The evaluation_criteria should specify the expected structure for user stories (e.g., "As a [type of user], I want [an action or feature] so that [benefit/value].").
-persona_product_manager_eval = (
-    "You are an evaluation agent that checks whether the Product Manager's "
-    "answers are valid user stories. You only judge user-story quality and "
-    "structure; you do not evaluate features or development tasks."
-)
+# persona_product_manager_eval = (
+#     "You are an evaluation agent that checks whether the Product Manager's "
+#     "answers are valid user stories. You only judge user-story quality and "
+#     "structure; you do not evaluate features or development tasks."
+# )
+persona_product_manager_eval = "You are an evaluation agent that checks the answers of other worker agents."
+
 evaluation_criteria_product_manager = (
     "The answer should be stories that follow the following structure: "
     "As a [type of user], I want [an action or feature] so that [benefit/value]."
@@ -167,11 +169,12 @@ program_manager_knowledge_agent = KnowledgeAugmentedPromptAgent(
 )
 
 # Program Manager - Evaluation Agent
-persona_program_manager_eval = (
-    "You are an evaluation agent that checks whether the Program Manager's "
-    "answers are valid product features. You only judge feature quality and "
-    "structure; you do not evaluate user stories or development tasks."
-)
+# persona_program_manager_eval = (
+#     "You are an evaluation agent that checks whether the Program Manager's "
+#     "answers are valid product features. You only judge feature quality and "
+#     "structure; you do not evaluate user stories or development tasks."
+# )
+persona_program_manager_eval = "You are an evaluation agent that checks the answers of other worker agents."
 
 # TODO: 8 - Instantiate a program_manager_evaluation_agent using 'persona_program_manager_eval' and the evaluation criteria below.
 #                      "The answer should be product features that follow the following structure: " \
@@ -223,11 +226,13 @@ development_engineer_knowledge_agent = KnowledgeAugmentedPromptAgent(
 )
 
 # Development Engineer - Evaluation Agent
-persona_dev_engineer_eval = (
-    "You are an evaluation agent that checks whether the Development Engineer's "
-    "answers are valid development tasks. You only judge development-task quality "
-    "and structure; you do not evaluate user stories or features."
-)
+# persona_dev_engineer_eval = (
+#     "You are an evaluation agent that checks whether the Development Engineer's "
+#     "answers are valid development tasks. You only judge development-task quality "
+#     "and structure; you do not evaluate user stories or features."
+# )
+persona_dev_engineer_eval = "You are an evaluation agent that checks the answers of other worker agents."
+
 # TODO: 9 - Instantiate a development_engineer_evaluation_agent using 'persona_dev_engineer_eval' and the evaluation criteria below.
 #                      "The answer should be tasks following this exact structure: " \
 #                      "Task ID: A unique identifier for tracking purposes\n" \
@@ -334,22 +339,28 @@ def call_with_retries(description, func, *args, max_attempts=3, delay_seconds=5)
 
 
 def run_worker_with_evaluation(role_name, knowledge_agent, evaluation_agent, query):
-    """Run the worker/evaluator loop for a query and return the validated response.
+    """Run the worker and evaluator for a query and return the validated response.
 
-    The evaluation agent drives the worker internally (it prompts the worker with
-    the query, judges the response, and iterates with corrections). Retries
-    transient failures; if the evaluation loop fails entirely, falls back to a
-    single unevaluated worker response instead of crashing the workflow.
+    First the knowledge agent produces a worker response for the query. That
+    response is then passed to the evaluation agent, which judges it and
+    iterates with corrections until it is validated. Transient failures are
+    retried; if the evaluation loop fails entirely, the workflow falls back to
+    the unevaluated worker response instead of crashing.
     """
+    worker_response = call_with_retries(
+        f"{role_name} knowledge agent",
+        knowledge_agent.respond,
+        query,
+    )  
     try:
-        evaluation = call_with_retries(f"{role_name} evaluation loop", evaluation_agent.evaluate, query)
+        evaluation = call_with_retries(f"{role_name} evaluation loop", evaluation_agent.evaluate, worker_response)
         return evaluation["final_response"]
     except Exception as error:
         logger.error(
             "%s evaluation loop failed (%s); falling back to an unevaluated worker response.",
             role_name, error,
         )
-        return call_with_retries(f"{role_name} knowledge agent (fallback)", knowledge_agent.respond, query)
+        return worker_response
 
 
 # Shared workflow state
