@@ -474,39 +474,33 @@ def record_step(role_name, step, result):
 #   3. Have the response evaluated by the corresponding Evaluation Agent.
 #   4. Return the final validated response.
 def product_manager_support_function(query: str) -> str:
-    """Route product-persona/user-story steps through the Product Manager agents."""
-    result = run_worker_with_evaluation(
-        "Product Manager",
-        product_manager_knowledge_agent,
-        product_manager_evaluation_agent,
-        build_step_query(query),
-    )
-    record_step("Product Manager", query, result)
-    return result
+    """Support function for the Product Manager route."""
+    step_query = build_step_query(query)
+    worker_response = product_manager_knowledge_agent.respond(step_query)
+    evaluation_result = product_manager_evaluation_agent.evaluate(worker_response)
+    final_response = evaluation_result['final_response']
+    record_step("Product Manager", query, final_response)
+    return final_response
 
 
 def program_manager_support_function(query: str) -> str:
-    """Route product-feature steps through the Program Manager agents."""
-    result = run_worker_with_evaluation(
-        "Program Manager",
-        program_manager_knowledge_agent,
-        program_manager_evaluation_agent,
-        build_step_query(query),
-    )
-    record_step("Program Manager", query, result)
-    return result
+    """Support function for the Program Manager route."""
+    step_query = build_step_query(query)
+    worker_response = program_manager_knowledge_agent.respond(step_query)
+    evaluation_result = program_manager_evaluation_agent.evaluate(worker_response)
+    final_response = evaluation_result['final_response']
+    record_step("Program Manager", query, final_response)
+    return final_response
 
 
 def development_engineer_support_function(query: str) -> str:
-    """Route engineering-task steps through the Development Engineer agents."""
-    result = run_worker_with_evaluation(
-        "Development Engineer",
-        development_engineer_knowledge_agent,
-        development_engineer_evaluation_agent,
-        build_step_query(query),
-    )
-    record_step("Development Engineer", query, result)
-    return result
+    """Support function for the Development Engineer route."""
+    step_query = build_step_query(query)
+    worker_response = development_engineer_knowledge_agent.respond(step_query)
+    evaluation_result = development_engineer_evaluation_agent.evaluate(worker_response)
+    final_response = evaluation_result['final_response']
+    record_step("Development Engineer", query, final_response)
+    return final_response
 
 
 # Routing Agent

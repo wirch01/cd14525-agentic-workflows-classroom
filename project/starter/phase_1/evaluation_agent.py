@@ -26,5 +26,6 @@ evaluation_agent = EvaluationAgent(  # 3 - Instantiate the EvaluationAgent with 
 )
 
 # 4 - Evaluate the prompt and print the response from the EvaluationAgent
-evaluation_result = evaluation_agent.evaluate(prompt)
+response_from_knowledge_agent = knowledge_agent.respond(prompt)
+evaluation_result = evaluation_agent.evaluate(response_from_knowledge_agent)
 print(evaluation_result)
