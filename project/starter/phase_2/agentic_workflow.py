@@ -157,7 +157,9 @@ knowledge_program_manager = (
     "Features describe grouped capabilities, not individual user stories and not "
     "engineering implementation tasks. "
     "Group the user stories provided in the prompt's shared workflow context; "
-    "stay consistent with the product spec below. "
+    "every single user story from that context must be assigned to at least one "
+    "feature, and each feature must map to a capability described in the product "
+    "spec below. List the user stories each feature groups. "
     "\n\nProduct Spec:\n" + product_spec
 )
 # Instantiate a program_manager_knowledge_agent using 'persona_program_manager' and 'knowledge_program_manager'
@@ -188,7 +190,10 @@ evaluation_criteria_program_manager = (
     "Feature Name: A clear, concise title that identifies the capability\n"
     "Description: A brief explanation of what the feature does and its purpose\n"
     "Key Functionality: The specific capabilities or actions the feature provides\n"
-    "User Benefit: How this feature creates value for the user"
+    "User Benefit: How this feature creates value for the user\n"
+    "Coverage: every user story from the shared workflow context must be grouped "
+    "into at least one feature, and every feature must correspond to a "
+    "capability described in the product spec."
 )
 program_manager_evaluation_agent = EvaluationAgent(
     openai_api_key=openai_api_key,
@@ -214,7 +219,10 @@ knowledge_dev_engineer = (
     "estimate, and dependencies. Tasks are implementation-level work items, not "
     "user stories and not feature groupings. "
     "Define tasks for the user stories provided in the prompt's shared workflow "
-    "context, referencing those stories; stay consistent with the product spec below. "
+    "context, referencing those stories. Work through the stories one by one: "
+    "every user story and every feature in that context must receive at least "
+    "one task, and no story or feature may be left without tasks. Each task must "
+    "implement a capability described in the product spec below. "
     "\n\nProduct Spec:\n" + product_spec
 )
 # Instantiate a development_engineer_knowledge_agent using 'persona_dev_engineer' and 'knowledge_dev_engineer'
@@ -251,7 +259,11 @@ evaluation_criteria_dev_engineer = (
     "Description: Detailed explanation of the technical work required\n"
     "Acceptance Criteria: Specific requirements that must be met for completion\n"
     "Estimated Effort: Time or complexity estimation\n"
-    "Dependencies: Any tasks that must be completed first"
+    "Dependencies: Any tasks that must be completed first\n"
+    "Coverage: every user story and every feature from the shared workflow "
+    "context must be referenced by at least one task, and every task must "
+    "implement a capability described in the product spec. Tasks that all "
+    "reference the same single user story do not meet the criteria."
 )
 development_engineer_evaluation_agent = EvaluationAgent(
     openai_api_key=openai_api_key,
@@ -267,24 +279,44 @@ development_engineer_evaluation_agent = EvaluationAgent(
 persona_synthesis = (
     "You are a Project Plan Synthesizer. You are solely responsible for merging "
     "already validated user stories, product features, and engineering tasks into "
-    "one coherent, internally consistent project plan document. You do NOT invent "
-    "new user stories, features, or tasks; you consolidate, deduplicate, and "
-    "cross-reference the material you are given."
+    "one coherent, internally consistent and complete project plan document. You "
+    "consolidate, deduplicate, and cross-reference the material you are given. "
+    "You do NOT invent new user stories or features, and you only add an "
+    "engineering task when a user story or feature would otherwise have none, "
+    "deriving it from the product spec."
 )
 knowledge_synthesis = (
     "A complete project plan document for a product contains three consistent, "
     "cross-referenced sections:\n"
     "1. User Stories: numbered stories (US-1, US-2, ...) in the form 'As a [type "
     "of user], I want [an action or feature] so that [benefit/value].'\n"
-    "2. Product Features: each with Feature Name, Description, Key Functionality, "
-    "User Benefit, and Related User Stories (the story IDs from section 1 that "
-    "the feature groups).\n"
-    "3. Engineering Tasks: each with Task ID, Task Title, Related User Story (a "
-    "real story ID from section 1), Description, Acceptance Criteria, Estimated "
-    "Effort, and Dependencies.\n"
-    "The plan must be internally consistent: every feature and every task "
-    "references only story IDs that exist in section 1, and all content stays "
-    "faithful to the product spec below. "
+    "2. Product Features: every feature is written as plain labelled lines, each "
+    "line starting with the exact label followed by a colon, in this order:\n"
+    "Feature Name: <a clear, concise title that identifies the capability>\n"
+    "Description: <a brief explanation of what the feature does and its purpose>\n"
+    "Key Functionality: <the specific capabilities or actions the feature provides>\n"
+    "User Benefit: <how this feature creates value for the user>\n"
+    "Related User Stories: <the story IDs from section 1 that the feature groups>\n"
+    "3. Engineering Tasks: every task is written as plain labelled lines, each "
+    "line starting with the exact label followed by a colon, in this order: "
+    "Task ID, Task Title, Related User Story (a real story ID from section 1), "
+    "Description, Acceptance Criteria, Estimated Effort, Dependencies.\n"
+    "Never replace a label with a bold or numbered heading and never omit a "
+    "label: the literal label text and its colon must always be present, for "
+    "example 'Feature Name: Automated Response' and 'Task ID: DEV-001'.\n"
+    "The plan must be internally consistent and complete. Before finishing, "
+    "verify these grounding and coverage checks and fix any gap:\n"
+    "- Every user story maps to a capability described in the product spec.\n"
+    "- Every feature and every task references only story IDs that exist in "
+    "section 1.\n"
+    "- Every user story is grouped by at least one feature.\n"
+    "- Every feature has at least one engineering task supporting it, and every "
+    "user story is referenced by at least one task.\n"
+    "- Every task supports one of the listed features and implements work "
+    "described in the product spec.\n"
+    "Do not rewrite or drop validated content; where a story or feature has no "
+    "task yet, derive the missing tasks from the product spec below rather than "
+    "leaving the coverage gap. "
     "\n\nProduct Spec:\n" + product_spec
 )
 synthesis_knowledge_agent = KnowledgeAugmentedPromptAgent(
@@ -303,12 +335,23 @@ evaluation_criteria_synthesis = (
     "The answer should be a single project plan document with three sections: "
     "(1) numbered user stories (US-1, US-2, ...) in the form 'As a [type of "
     "user], I want [an action or feature] so that [benefit/value].'; "
-    "(2) product features, each with Feature Name, Description, Key "
-    "Functionality, User Benefit, and Related User Stories listing story IDs "
-    "from section 1; "
-    "(3) engineering tasks, each with Task ID, Task Title, Related User Story, "
-    "Description, Acceptance Criteria, Estimated Effort, and Dependencies, where "
-    "every referenced user story ID exists in section 1."
+    "(2) product features, each written as labelled lines that literally start "
+    "with 'Feature Name:', 'Description:', 'Key Functionality:', 'User "
+    "Benefit:' and 'Related User Stories:' listing story IDs from section 1; "
+    "(3) engineering tasks, each written as labelled lines that literally start "
+    "with 'Task ID:', 'Task Title:', 'Related User Story:', 'Description:', "
+    "'Acceptance Criteria:', 'Estimated Effort:' and 'Dependencies:', where "
+    "every referenced user story ID exists in section 1. "
+    "A feature or task whose fields are rendered as bold or numbered headings "
+    "instead of the literal labels followed by a colon does not meet the "
+    "criteria. "
+    "The plan must also pass these grounding and coverage checks: each user "
+    "story maps to a capability from the product spec; each user story is "
+    "grouped by at least one feature; each feature is supported by at least one "
+    "engineering task; each user story is referenced by at least one task; and "
+    "each task supports one of the listed features. A plan whose tasks all "
+    "reference the same single user story or cover only one feature does not "
+    "meet the criteria."
 )
 synthesis_evaluation_agent = EvaluationAgent(
     openai_api_key=openai_api_key,
@@ -585,8 +628,10 @@ elif workflow_state:
         "three sections: User Stories (numbered US-1, US-2, ...), Product "
         "Features (each listing the story IDs it groups as Related User "
         "Stories), and Engineering Tasks (each referencing a real story ID). "
-        "Do not invent new content; consolidate, deduplicate, and resolve all "
-        "cross-references.\n\n"
+        "Consolidate, deduplicate, and resolve all cross-references, and make "
+        "sure every user story is grouped by at least one feature and every "
+        "story and feature is covered by at least one engineering task; derive "
+        "any missing task from the product spec instead of leaving a gap.\n\n"
         + format_shared_context()
     )
     try:
